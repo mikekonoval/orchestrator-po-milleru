@@ -202,6 +202,99 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# --- баг-репорт: race на .git/index.lock ------------------------------------
+# git_commit_phase раньше глотал ошибку commit и врал, что коммит прошёл,
+# возвращая прежний HEAD как «свежий SHA». Регрессия:
+#  1. при провале возвращает non-zero
+#  2. на stdout НЕТ SHA
+#  3. HEAD не сдвинулся
+#  4. после снятия lock следующий вызов проходит штатно
+echo
+echo "git_commit_phase при race на .git/index.lock:"
+
+mkdir -p "$REPO/$PLAN_DIR_REL/phase3"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase3/errors.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase3/missing.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase3/review.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase3/security.md"
+cat > "$REPO/$PLAN_DIR_REL/phase3/final_check.md" <<'EOF'
+## REGRESSION
+чисто
+
+## SMOKE
+pass
+EOF
+
+HEAD_BEFORE="$(git -C "$REPO" rev-parse --short HEAD)"
+touch "$REPO/.git/index.lock"
+
+# В тестах не хотим ждать 2+4=6 секунд — сокращаем паузу до нуля.
+RC=0
+OUT="$(ORCHESTRATOR_LOCK_RETRY_SLEEP=0 git_commit_phase 3 "$REPO/$PLAN_DIR_REL/plan.md" "$PLAN_NAME" 2>/dev/null)" || RC=$?
+
+assert_eq "1" "$RC" "git_commit_phase возвращает 1 при index.lock"
+assert_eq "" "$OUT" "git_commit_phase не печатает SHA при провале"
+
+HEAD_AFTER="$(git -C "$REPO" rev-parse --short HEAD)"
+assert_eq "$HEAD_BEFORE" "$HEAD_AFTER" "HEAD не сдвинулся после провального commit"
+
+# Снимаем lock — следующий commit должен пройти.
+rm -f "$REPO/.git/index.lock"
+SHA3="$(git_commit_phase 3 "$REPO/$PLAN_DIR_REL/plan.md" "$PLAN_NAME")"
+HEAD_RECOVERED="$(git -C "$REPO" rev-parse --short HEAD)"
+if [[ "$SHA3" =~ ^[0-9a-f]+$ && "$HEAD_RECOVERED" != "$HEAD_BEFORE" ]]; then
+  echo "  ✓ после снятия lock commit прошёл, SHA: $SHA3"
+  PASS=$((PASS + 1))
+else
+  echo "  ✗ после снятия lock commit не прошёл (SHA='$SHA3', HEAD='$HEAD_RECOVERED')"
+  FAIL=$((FAIL + 1))
+fi
+
+# Контрольный сценарий: commit падает по «детерминированной» причине (нет staged
+# изменений) — retry не должен крутиться, должны выйти сразу с return 1.
+echo
+echo "git_commit_phase при детерминированной ошибке (нечего коммитить):"
+RC2=0
+OUT2="$(ORCHESTRATOR_LOCK_RETRY_SLEEP=0 git_commit_phase 99 "$REPO/$PLAN_DIR_REL/plan.md" "$PLAN_NAME" 2>/dev/null)" || RC2=$?
+assert_eq "1" "$RC2" "git_commit_phase возвращает 1 когда нечего коммитить"
+assert_eq "" "$OUT2" "git_commit_phase не печатает SHA когда нечего коммитить"
+
+# --- state после провала autocommit -----------------------------------------
+# Контракт: фаза по сути закрыта (status=done), но autocommit не прошёл
+# (commit=failed). state_already_done должен вернуть true, чтобы повторный
+# запуск той же фазы НЕ молотил её заново. При переходе на другую фазу
+# state_init обязан почистить .commit, чтобы старая отметка не текла.
+# shellcheck source=../../scripts/lib/state.sh
+SKILL_DIR_FOR_STATE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+STATE_FILE="$REPO/state.json"
+source "$SKILL_DIR_FOR_STATE/scripts/lib/state.sh"
+
+echo
+echo "state.json после провала autocommit:"
+PHASE=3
+state_init 3
+state_set "status" "done"
+state_set "commit" "failed"
+state_set "error" "autocommit failed"
+
+if state_already_done 3; then
+  echo "  ✓ state_already_done == true при status=done + commit=failed"
+  PASS=$((PASS + 1))
+else
+  echo "  ✗ state_already_done вернула false — повторный запуск перезапустит фазу"
+  FAIL=$((FAIL + 1))
+fi
+
+assert_eq "failed" "$(jq -r '.commit' "$STATE_FILE")" ".commit=failed сохранён в state.json"
+assert_eq "done"   "$(jq -r '.status' "$STATE_FILE")" ".status остался done"
+
+# Переходим на следующую фазу — старое поле .commit должно исчезнуть.
+state_init 4
+COMMIT_AFTER=$(jq -r '.commit // "absent"' "$STATE_FILE")
+ERROR_AFTER=$(jq -r '.error // "absent"' "$STATE_FILE")
+assert_eq "absent" "$COMMIT_AFTER" "state_init почистил .commit при переходе на следующую фазу"
+assert_eq "absent" "$ERROR_AFTER" "state_init почистил .error при переходе на следующую фазу"
+
 echo
 echo "Итого: $PASS прошло, $FAIL упало"
 [[ "$FAIL" -eq 0 ]] || exit 1

@@ -278,8 +278,21 @@ if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
   elif ! git_available; then
     log "autocommit пропущен (не git-репо)"
   else
-    SHA="$(git_commit_phase "$PHASE" "$PLAN_FILE" "$PLAN_NAME")"
-    log "autocommit: $SHA"
+    if SHA="$(git_commit_phase "$PHASE" "$PLAN_FILE" "$PLAN_NAME")"; then
+      log "autocommit: $SHA"
+    else
+      log "ERROR: autocommit фазы $PHASE упал."
+      log "       Вероятная причина — race на .git/index.lock или другой git-процесс."
+      log "       Файлы фазы остались staged. Закоммить руками:"
+      log "         git commit -m \"phase $PHASE: $(phase_description "$PLAN_FILE" "$PHASE")\""
+      # status=done — фаза реально закрыта (галочка стоит, summary вставлен,
+      # отчёты записаны). Отдельное поле .commit=failed говорит, что не хватает
+      # только git-коммита. state_already_done вернёт true → повторный запуск
+      # этой же фазы отскочит, не будет молотить её заново.
+      state_set "commit" "failed"
+      state_set "error" "autocommit failed"
+      exit 5
+    fi
   fi
 
   exit 0

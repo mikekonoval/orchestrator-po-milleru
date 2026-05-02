@@ -57,7 +57,13 @@ for phase in "${PENDING[@]}"; do
   rc="${rc:-0}"
   if [[ "$rc" -ne 0 ]]; then
     echo
-    echo "Фаза $phase упала с кодом $rc. Остановка."
+    case "$rc" in
+      2) echo "Фаза $phase: ESCALATE — нужно ручное вмешательство (exit 2)." ;;
+      3) echo "Фаза $phase: ## SMOKE != pass или ## REGRESSION dirty (exit 3)." ;;
+      5) echo "Фаза $phase: autocommit упал — race на .git/index.lock или другой git-процесс. Файлы остались staged (exit 5)." ;;
+      *) echo "Фаза $phase упала с кодом $rc." ;;
+    esac
+    echo "  Остановка."
     echo "  state.json: $(cat "$PLAN_DIR/state.json" 2>/dev/null || echo 'нет')"
     exit "$rc"
   fi

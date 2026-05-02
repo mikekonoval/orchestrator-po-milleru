@@ -30,7 +30,8 @@ state_init() {
       .status = "running" |
       .started_at = $t |
       .updated_at = $t |
-      del(.error)
+      del(.error) |
+      del(.commit)
     ' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
   fi
 }

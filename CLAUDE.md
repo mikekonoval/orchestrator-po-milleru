@@ -44,14 +44,14 @@ Smoke-тесты (запускаются из корня репо):
 
 ```bash
 bash skill/tests/smoke/test-parse-report.sh        # парсер маркеров на фикстурах (12 ассертов)
-bash skill/tests/smoke/test-init-project.sh        # init-project в tmp-каталоге (7 ассертов)
-bash skill/tests/smoke/test-run-phase-dry.sh       # весь пайплайн в --dry-run (13 ассертов)
-bash skill/tests/smoke/test-git-helpers.sh         # phase_description, git_available, git_commit_phase (20 ассертов)
+bash skill/tests/smoke/test-init-project.sh        # init-project в tmp-каталоге (17 ассертов)
+bash skill/tests/smoke/test-run-phase-dry.sh       # весь пайплайн в --dry-run (15 ассертов)
+bash skill/tests/smoke/test-git-helpers.sh         # phase_description, git_available, git_commit_phase + state после провала autocommit (32 ассерта)
 bash skill/tests/smoke/test-prompts-preamble.sh    # каждый промт ссылается на CLAUDE.md, idea/, architecture/, plans/ (70 ассертов)
 bash skill/tests/smoke/test-summary.sh             # phase_summary_block, applied_summary, insert_summary_into_plan (21 ассерт)
 ```
 
-Всего **143 ассерта**. После любых правок в `skill/scripts/lib/` или `skill/prompts/` — прогнать всё.
+Всего **167 ассертов**. После любых правок в `skill/scripts/lib/` или `skill/prompts/` — прогнать всё.
 
 Sanity-проверка синтаксиса всех bash-скриптов:
 
@@ -89,6 +89,7 @@ bash install.sh --uninstall local /tmp/test-project
 - **Стартовая проверка:** перед фазой `git_tree_clean` должен вернуть true. Иначе abort. Это гарантирует, что в фазовый коммит попадает ровно то, что наоркестрировал пайплайн.
 - **Коммит:** заголовок `phase N: <phase_description из plan>`, тело — список отчётов. Сообщение собирает скрипт, не LLM.
 - **Когда не коммитим:** не git-репо / `--no-commit` / ESCALATE / smoke fail. На двух последних — намеренно: пользователь должен разобраться сам, а не получить замаскированную проблему в коммите.
+- **`git commit` может упасть** (типично — гонка на `.git/index.lock` от IDE/watch-скрипта). `git_commit_phase` делает до 3 попыток с экспоненциальной паузой ТОЛЬКО при наличии index.lock; на детерминированных ошибках (нечего коммитить, hook отказал) — выходит сразу. При окончательном провале возвращает non-zero и **ничего не печатает в stdout** — вызывающий код в `run-phase.sh` не должен видеть «успешный SHA» при провальном коммите. State: `status=done, commit=failed, error=autocommit failed`, exit 5 — `status` остаётся `done`, потому что фаза по сути закрыта (галочка в плане, summary, отчёты), отдельное поле `.commit` отмечает только пропущенный git-шаг. Это держит `state_already_done` в true и защищает от случайного перезапуска уже сделанной фазы. `state_init` обязан удалять `.commit` (и `.error`) при переходе на следующую фазу — иначе старая отметка протекает в state.json. В тестах паузу можно занулить через `ORCHESTRATOR_LOCK_RETRY_SLEEP=0`.
 - **Опт-аут грязного дерева:** `--allow-dirty` — autocommit засосёт всё подряд, использовать редко.
 
 Если правишь логику autocommit — `test-git-helpers.sh` обязательно прогнать перед коммитом.

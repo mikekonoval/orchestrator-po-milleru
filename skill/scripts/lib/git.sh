@@ -76,6 +76,29 @@ EOF
 )"
 
   git -C "$PROJECT_DIR" add -A
-  git -C "$PROJECT_DIR" commit -m "$body" >/dev/null
-  echo "$(git -C "$PROJECT_DIR" rev-parse --short HEAD)"
+
+  # Один retry с задержкой при гонке на .git/index.lock — типовая ситуация
+  # с IDE-расширениями / параллельным git status / watch-скриптами.
+  # На других причинах падения commit (нет staged, hook отказал) — не повторяем,
+  # чтобы не зацикливаться на детерминированной ошибке.
+  # stderr не глушим — fatal-сообщения от git нужны для диагностики.
+  local sleep_base="${ORCHESTRATOR_LOCK_RETRY_SLEEP:-2}"
+  local attempt
+  for attempt in 1 2 3; do
+    if git -C "$PROJECT_DIR" commit -m "$body" >/dev/null; then
+      git -C "$PROJECT_DIR" rev-parse --short HEAD
+      return 0
+    fi
+    # Если упали не из-за index.lock — выходим сразу, retry бесполезен.
+    if [[ ! -f "$PROJECT_DIR/.git/index.lock" ]]; then
+      return 1
+    fi
+    if [[ "$attempt" -eq 3 ]]; then
+      return 1
+    fi
+    local sleep_sec=$((attempt * sleep_base))
+    echo "git_commit_phase: .git/index.lock держит другой процесс, повтор через ${sleep_sec}s (попытка $((attempt + 1))/3)" >&2
+    sleep "$sleep_sec"
+  done
+  return 1
 }
