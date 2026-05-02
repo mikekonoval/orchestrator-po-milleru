@@ -85,6 +85,19 @@ source "$SKILL_DIR/scripts/lib/parse-report.sh"
 source "$SKILL_DIR/scripts/lib/git.sh"
 # shellcheck source=lib/summary.sh
 source "$SKILL_DIR/scripts/lib/summary.sh"
+# shellcheck source=lib/progress.sh
+source "$SKILL_DIR/scripts/lib/progress.sh"
+
+# Путь к plan.md активного плана — нужен прогресс-бару с самого начала
+# (для подсчёта закрытых/всего фаз). До autocommit'а используем его же.
+PLAN_FILE="$(plan_md_for "$PLAN_NAME" || true)"
+
+# В dry-run heartbeat не нужен — это шумит и завязано на реальное время.
+[[ "${DRY_RUN:-}" == "--dry-run" ]] && export ORCHESTRATOR_NO_HEARTBEAT=1
+
+# Гарантия, что фоновый heartbeat не останется висеть при Ctrl+C, ошибке
+# или нормальном завершении.
+trap 'progress_stop_heartbeat' EXIT
 
 # --- helpers ----------------------------------------------------------------
 
@@ -140,13 +153,23 @@ require_file() {
   [[ -f "$f" ]] || die "ожидаю файл $f после шага «$hint», но его нет — суб-агент не записал отчёт"
 }
 
+# Единая точка перехода между шагами фазы. Делает три вещи в нужном порядке:
+# state.json → прогресс-бар → перезапуск heartbeat для нового шага.
+set_step() {
+  local step_name="$1"
+  state_set "step" "$step_name"
+  progress_stop_heartbeat
+  progress_render "$PLAN_FILE" "$step_name"
+  progress_start_heartbeat "$step_name"
+}
+
 # --- блок: один из errors|missing|review|security ---------------------------
 
 run_block() {
   local block="$1"
   local report_file="$PHASE_DIR/${block}.md"
 
-  state_set "step" "${block}_find"
+  set_step "${block}_find"
   log "блок $block: поиск"
   run_agent "$(render_prompt "${block}_find.md")" "$block:find"
   require_file "$report_file" "${block}_find"
@@ -156,7 +179,7 @@ run_block() {
     return 0
   fi
 
-  state_set "step" "${block}_prove"
+  set_step "${block}_prove"
   log "блок $block: доказательство"
   run_agent "$(render_prompt "${block}_prove.md")" "$block:prove"
 
@@ -165,7 +188,7 @@ run_block() {
     return 0
   fi
 
-  state_set "step" "${block}_apply"
+  set_step "${block}_apply"
   log "блок $block: применение"
   run_agent "$(render_prompt "${block}_apply.md")" "$block:apply"
 
@@ -173,6 +196,7 @@ run_block() {
     log "блок $block: ESCALATE в ## APPLIED, останавливаю фазу"
     state_set "status" "escalated"
     state_set "error" "ESCALATE in plans/$PLAN_NAME/phase${PHASE}/${block}.md"
+    progress_phase_done "$PLAN_FILE" "$PHASE" "escalate"
     exit 2
   fi
 }
@@ -211,7 +235,7 @@ state_init "$PHASE"
 PHASE_PROMPT_FILE="$PLAN_DIR/promts/phase${PHASE}.md"
 if [[ ! -f "$PHASE_PROMPT_FILE" ]]; then
   log "$PHASE_PROMPT_FILE отсутствует, генерирую"
-  state_set "step" "phase_generate"
+  set_step "phase_generate"
   run_agent "$(render_prompt "phase_generate.md")" "phase:generate"
   if [[ "$DRY_RUN" != "--dry-run" ]]; then
     [[ -f "$PHASE_PROMPT_FILE" ]] || die "после phase_generate ожидаю $PHASE_PROMPT_FILE, его нет"
@@ -219,7 +243,7 @@ if [[ ! -f "$PHASE_PROMPT_FILE" ]]; then
 fi
 
 # 1. Сама фаза.
-state_set "step" "phase_run"
+set_step "phase_run"
 log "запуск фазы по $PHASE_PROMPT_FILE"
 if [[ -f "$PHASE_PROMPT_FILE" ]]; then
   PHASE_PROMPT_BODY="$(cat "$PHASE_PROMPT_FILE")"
@@ -235,7 +259,7 @@ run_block review
 run_block security
 
 # 3. Final check.
-state_set "step" "final_check"
+set_step "final_check"
 log "финальная проверка (regression + smoke)"
 run_agent "$(render_prompt "final_check.md")" "final:check"
 
@@ -250,8 +274,6 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
 fi
 
 # 4. Закрытие фазы.
-PLAN_FILE="$(plan_md_for "$PLAN_NAME" || true)"
-
 if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
   if [[ -n "$PLAN_FILE" ]] && grep -qE "^- \[ \] Фаза $PHASE" "$PLAN_FILE"; then
     if sed --version >/dev/null 2>&1; then
@@ -271,6 +293,8 @@ if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
   fi
   state_set "status" "done"
   log "✓ фаза $PHASE закрыта"
+  # plan.md уже обновлён [x] выше — бар плана сразу покажет новый процент.
+  progress_phase_done "$PLAN_FILE" "$PHASE" "done"
 
   # 5. Автокоммит. На успехе и только если в git-репо и не --no-commit.
   if [[ "$NO_COMMIT" == "yes" ]]; then
@@ -291,6 +315,7 @@ if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
       # этой же фазы отскочит, не будет молотить её заново.
       state_set "commit" "failed"
       state_set "error" "autocommit failed"
+      progress_phase_done "$PLAN_FILE" "$PHASE" "commit_failed"
       exit 5
     fi
   fi
@@ -303,5 +328,6 @@ else
   log "✗ фаза $PHASE не закрыта: ## SMOKE != pass или ## REGRESSION != чисто"
   log "  смотри $FINAL_FILE"
   log "  autocommit пропущен (фаза не закрылась)"
+  progress_phase_done "$PLAN_FILE" "$PHASE" "smoke_fail"
   exit 3
 fi

@@ -28,6 +28,7 @@ LLM-оркестратор не вытягивает ~100 итераций в о
 - **Память между шагами — файлы отчётов** с маркерами секций (`## FOUND` / `## PROVEN` / `## APPLIED` / `## REGRESSION` / `## SMOKE`), append-only.
 - **Ветвления — через grep этих маркеров** в [skill/scripts/lib/parse-report.sh](skill/scripts/lib/parse-report.sh). Не через LLM.
 - **State — `state.json`** в корне проекта пользователя (`phase`, `step`, `status`). Редактируется через [skill/scripts/lib/state.sh](skill/scripts/lib/state.sh).
+- **Прогресс-бар — [skill/scripts/lib/progress.sh](skill/scripts/lib/progress.sh).** Печатает в stderr две строки (План + Фаза) на каждом переходе шага через хелпер `set_step` в [run-phase.sh](skill/scripts/run-phase.sh). Между шагами раз в 30 сек обновляет на месте (через `\r` + `\033[K`) строку `[idle M:SS] step_name` — heartbeat. Знаменатель фазы фиксированный 16, на пропусках бар «прыгает» — намеренно, чтобы не считать развилки. В dry-run heartbeat выключается через `ORCHESTRATOR_NO_HEARTBEAT=1`.
 
 ### Инварианты, которые легко нарушить
 
@@ -49,9 +50,10 @@ bash skill/tests/smoke/test-run-phase-dry.sh       # весь пайплайн �
 bash skill/tests/smoke/test-git-helpers.sh         # phase_description, git_available, git_commit_phase + state после провала autocommit (32 ассерта)
 bash skill/tests/smoke/test-prompts-preamble.sh    # каждый промт ссылается на CLAUDE.md, idea/, architecture/, plans/ (70 ассертов)
 bash skill/tests/smoke/test-summary.sh             # phase_summary_block, applied_summary, insert_summary_into_plan (21 ассерт)
+bash skill/tests/smoke/test-progress.sh            # progress_step_num, progress_bar, render двух строк, phase_done, heartbeat off (34 ассерта)
 ```
 
-Всего **167 ассертов**. После любых правок в `skill/scripts/lib/` или `skill/prompts/` — прогнать всё.
+Всего **201 ассерт**. После любых правок в `skill/scripts/lib/` или `skill/prompts/` — прогнать всё.
 
 Sanity-проверка синтаксиса всех bash-скриптов:
 
