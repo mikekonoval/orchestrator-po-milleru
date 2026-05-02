@@ -24,33 +24,59 @@ bash install.sh --uninstall global    # удалить
 - `CLAUDE.md` — продукт, аудитория, приоритеты
 - `architecture/*.md` — техническая документация и инварианты
 - `idea/*.md` (или аналогичная папка) — продуктовое видение и принципы
-- черновик плана фаз в `plans/*.md` со строками вида `- [ ] Фаза N: краткое описание` — **строго в этом формате**, иначе скрипт фазы не увидит
 
-Запуск из корня проекта:
+Каждый «прогон» — это **именованный план**. Папка `plans/<plan-name>/` хранит план фаз, отчёты и state. Можно держать несколько планов параллельно (например, `auth-rewrite` и `billing`) и переключаться между ними.
+
+### Создать план и запустить
 
 ```bash
+cd <project-root>
+
+# 1. Один раз на план: создать структуру и активировать
+bash ~/.claude/skills/orchestrator-po-milleru/scripts/init-project.sh auth-rewrite
+
+# 2. Описать фазы в plans/auth-rewrite/plan.md строками вида
+#    '- [ ] Фаза N: краткое описание' (формат строгий)
+
+# 3. Запустить
 bash ~/.claude/skills/orchestrator-po-milleru/scripts/run-phase.sh 1   # одну фазу
-bash ~/.claude/skills/orchestrator-po-milleru/scripts/run-all.sh        # все открытые фазы плана
+bash ~/.claude/skills/orchestrator-po-milleru/scripts/run-all.sh        # все открытые
 ```
 
-Скрипт пишет отчёты `errors_phase{N}.md`, `missing_phase{N}.md`, `review_phase{N}.md`, `security_phase{N}.md`, `final_check_phase{N}.md` в корень проекта. На каждой успешно закрытой фазе делает один git-коммит и вставляет блок резюме в план.
+### Раскладка файлов
 
-### Если проект пустой
+```
+<project>/plans/
+├── .active                          ← имя активного плана
+└── auth-rewrite/
+    ├── plan.md                      ← фазы и их резюме
+    ├── state.json                   ← состояние оркестратора для этого плана
+    ├── promts/phase1.md             ← промт фазы (генерируется при первом запуске)
+    └── phase1/                      ← отчёты блоков
+        ├── errors.md
+        ├── missing.md
+        ├── review.md
+        ├── security.md
+        └── final_check.md
+```
 
-Только для случая, когда оркестратор используется на проекте без `plans/`, `architecture/` и `state.json` — запусти один раз:
+На каждой успешно закрытой фазе оркестратор делает один git-коммит и вставляет блок резюме в `plan.md`.
+
+### Переключение между планами
 
 ```bash
-bash ~/.claude/skills/orchestrator-po-milleru/scripts/init-project.sh
+bash ~/.claude/skills/orchestrator-po-milleru/scripts/activate-plan.sh billing       # переключить
+bash ~/.claude/skills/orchestrator-po-milleru/scripts/activate-plan.sh               # показать текущий и список
 ```
 
-Создаст недостающие папки, пустой `state.json` и шаблон плана. Существующее не трогает.
+State у каждого плана свой — оборванная фаза сохранится, пока не возобновишь.
 
 ## Поведение
 
 - **Чистое git-дерево обязательно** перед стартом фазы (или флаг `--allow-dirty`).
 - **Autocommit на закрытии фазы** — один коммит со всеми правками + резюме в плане. Опт-аут: `--no-commit`.
-- **ESCALATE** — суб-агент решил, что нужен архитектурный редизайн → пайплайн останавливается (exit 2), смотри `*_phase{N}.md` секцию `## APPLIED`.
-- **SMOKE fail** — deliverable не выполняется → фаза не закрывается (exit 3), смотри `final_check_phase{N}.md`.
+- **ESCALATE** — суб-агент решил, что нужен архитектурный редизайн → пайплайн останавливается (exit 2), смотри `plans/<plan>/phase{N}/<block>.md` секцию `## APPLIED`.
+- **SMOKE fail** — deliverable не выполняется → фаза не закрывается (exit 3), смотри `plans/<plan>/phase{N}/final_check.md`.
 - **`--dry-run`** — симуляция без вызовов `claude -p` и без коммитов.
 
 ## Архитектура репозитория
@@ -63,9 +89,10 @@ bash ~/.claude/skills/orchestrator-po-milleru/scripts/init-project.sh
     ├── SKILL.md
     ├── scripts/
     │   ├── run-phase.sh           # одна фаза × 5 блоков
-    │   ├── run-all.sh             # цикл по фазам
-    │   ├── init-project.sh        # bootstrap проекта
-    │   └── lib/                   # state, parse-report, git, summary
+    │   ├── run-all.sh             # цикл по фазам активного плана
+    │   ├── init-project.sh        # bootstrap нового плана
+    │   ├── activate-plan.sh       # переключение между планами
+    │   └── lib/                   # plan, state, parse-report, git, summary
     ├── prompts/                   # 13 шагов + phase_generate
     ├── templates/                 # state.json, plan.md
     └── tests/smoke/               # 6 тестов, 143 ассерта

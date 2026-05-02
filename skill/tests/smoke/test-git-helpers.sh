@@ -110,14 +110,16 @@ git -C "$REPO" commit -m "initial" -q
 
 # --- git_commit_phase -------------------------------------------------------
 
-# Симулируем то, что наоркестрировал run-phase: меняем файлы.
-mkdir -p "$REPO/plans"
-cp "$PLAN" "$REPO/plans/2026-05-02-orchestrator.md"
-echo "## FOUND: пусто" > "$REPO/errors_phase1.md"
-echo "## FOUND: пусто" > "$REPO/missing_phase1.md"
-echo "## FOUND: пусто" > "$REPO/review_phase1.md"
-echo "## FOUND: пусто" > "$REPO/security_phase1.md"
-cat > "$REPO/final_check_phase1.md" <<'EOF'
+# Симулируем то, что наоркестрировал run-phase: создаём plan-папку и отчёты.
+PLAN_NAME="myplan"
+PLAN_DIR_REL="plans/$PLAN_NAME"
+mkdir -p "$REPO/$PLAN_DIR_REL/phase1"
+cp "$PLAN" "$REPO/$PLAN_DIR_REL/plan.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase1/errors.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase1/missing.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase1/review.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase1/security.md"
+cat > "$REPO/$PLAN_DIR_REL/phase1/final_check.md" <<'EOF'
 ## REGRESSION
 чисто
 
@@ -127,7 +129,7 @@ EOF
 
 echo
 echo "git_commit_phase:"
-SHA="$(git_commit_phase 1 "$REPO/plans/2026-05-02-orchestrator.md")"
+SHA="$(git_commit_phase 1 "$REPO/$PLAN_DIR_REL/plan.md" "$PLAN_NAME")"
 if [[ -n "$SHA" && "$SHA" =~ ^[0-9a-f]+$ ]]; then
   echo "  ✓ возвращает короткий sha: $SHA"
   PASS=$((PASS + 1))
@@ -140,7 +142,7 @@ fi
 SUBJECT="$(git -C "$REPO" log -1 --format=%s)"
 BODY="$(git -C "$REPO" log -1 --format=%b)"
 
-if [[ "$SUBJECT" == "phase 1: построить базовую структуру" ]]; then
+if [[ "$SUBJECT" == "[$PLAN_NAME] phase 1: построить базовую структуру" ]]; then
   echo "  ✓ заголовок коммита корректный: $SUBJECT"
   PASS=$((PASS + 1))
 else
@@ -148,8 +150,8 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if echo "$BODY" | grep -q "errors_phase1.md"; then
-  echo "  ✓ в теле коммита есть ссылки на отчёты"
+if echo "$BODY" | grep -q "$PLAN_DIR_REL/phase1/errors.md"; then
+  echo "  ✓ в теле коммита есть ссылки на отчёты по новым путям"
   PASS=$((PASS + 1))
 else
   echo "  ✗ в теле коммита нет ссылок на отчёты"
@@ -158,7 +160,8 @@ fi
 
 # Файлы должны быть в коммите
 FILES="$(git -C "$REPO" show --name-only --format= HEAD | sort)"
-for expected in "errors_phase1.md" "missing_phase1.md" "review_phase1.md" "security_phase1.md" "final_check_phase1.md"; do
+for fname in errors.md missing.md review.md security.md final_check.md; do
+  expected="$PLAN_DIR_REL/phase1/$fname"
   if echo "$FILES" | grep -qE "^${expected}$"; then
     echo "  ✓ закоммичен: $expected"
     PASS=$((PASS + 1))
@@ -172,6 +175,32 @@ done
 echo
 echo "после autocommit:"
 assert_exit 0 "git_tree_clean true после коммита" git_tree_clean
+
+# Проверим, что без plan_name (третий аргумент) git_commit_phase вытаскивает имя из пути.
+echo
+echo "git_commit_phase без явного plan_name:"
+mkdir -p "$REPO/$PLAN_DIR_REL/phase2"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase2/errors.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase2/missing.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase2/review.md"
+echo "## FOUND: пусто" > "$REPO/$PLAN_DIR_REL/phase2/security.md"
+cat > "$REPO/$PLAN_DIR_REL/phase2/final_check.md" <<'EOF'
+## REGRESSION
+чисто
+
+## SMOKE
+pass
+EOF
+
+SHA2="$(git_commit_phase 2 "$REPO/$PLAN_DIR_REL/plan.md")"
+SUBJECT2="$(git -C "$REPO" log -1 --format=%s)"
+if [[ "$SUBJECT2" == "[$PLAN_NAME] phase 2: добавить логирование" ]]; then
+  echo "  ✓ git_commit_phase извлёк plan_name из пути: $SUBJECT2"
+  PASS=$((PASS + 1))
+else
+  echo "  ✗ не извлёк plan_name из пути, заголовок: $SUBJECT2"
+  FAIL=$((FAIL + 1))
+fi
 
 echo
 echo "Итого: $PASS прошло, $FAIL упало"

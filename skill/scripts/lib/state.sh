@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# state.sh — управление state.json в корне проекта.
+# state.sh — управление state.json активного плана.
 # Подключается через `source`. Ожидает, что переменные STATE_FILE и PHASE заданы.
+# STATE_FILE — путь к state.json внутри plan-папки ($PLAN_DIR/state.json).
 
 state_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 

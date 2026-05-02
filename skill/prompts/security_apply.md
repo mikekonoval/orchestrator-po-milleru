@@ -5,11 +5,11 @@
 1. **`CLAUDE.md`** — продукт, приоритеты.
 2. **`idea/`** (если есть) — особенно `05-principles/` (security-принципы), `09-mvp/` (scope — нельзя выйти за рамки фазы под предлогом security).
 3. **`architecture/`** (если есть) — особенно `02-ядро/` (механизмы прав), `05-интеграции/` (внешние границы), `07-решения/` (ADR по security). Security-фикс не должен ломать существующие решения.
-4. **`plans/promts/phase{N}.md`** — рамки фазы.
+4. **`{PLAN_DIR}/promts/phase{N}.md`** — рамки фазы.
 
 ## Что ещё прочитать для этого шага
 
-5. **`security_phase{N}.md`** — секцию `## PROVEN`.
+5. **`{PLAN_DIR}/phase{N}/security.md`** — секцию `## PROVEN`.
 6. Код в реальных проблемных местах.
 
 ## Что сделать
@@ -29,7 +29,7 @@ ESCALATE: <причина, со ссылкой на ADR/принцип, кото
 
 ## Куда записать (если не ESCALATE)
 
-Дополни `security_phase{N}.md`:
+Дополни `{PLAN_DIR}/phase{N}/security.md`:
 
 ```markdown
 ## APPLIED
@@ -39,4 +39,4 @@ ESCALATE: <причина, со ссылкой на ADR/принцип, кото
   ```
 ```
 
-В финальном ответе: `STATUS=done FILE=security_phase{N}.md APPLIED=<число>` или `STATUS=escalate REASON=<...>`.
+В финальном ответе: `STATUS=done FILE={PLAN_DIR}/phase{N}/security.md APPLIED=<число>` или `STATUS=escalate REASON=<...>`.

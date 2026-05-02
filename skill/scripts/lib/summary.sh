@@ -4,6 +4,9 @@
 #
 # Подключается через `source`. Зависит от parse-report.sh (section_body, smoke_passed,
 # found_empty) и git.sh (phase_description). Их подключай раньше.
+#
+# Раскладка отчётов: $PLAN_DIR/phase{N}/{errors,missing,review,security,final_check}.md
+# где $PLAN_DIR — папка активного плана ($PROJECT_DIR/plans/<name>/).
 
 # Маркер в plan.md, перед которым вставляется блок резюме.
 SUMMARY_MARKER="<!-- РЕЗЮМЕ ФАЗ ВЫШЕ ЭТОЙ СТРОКИ. Не удаляй маркер. -->"
@@ -32,11 +35,12 @@ applied_summary() {
 }
 
 # Генерирует Markdown-блок резюме одной фазы.
-# Args: phase_number, plan_file, project_dir
+# Args: phase_number, plan_file, plan_dir
+# plan_dir — абсолютный путь к папке плана (внутри неё лежат phaseN/*.md).
 phase_summary_block() {
   local phase="$1"
   local plan_file="$2"
-  local proj_dir="$3"
+  local plan_dir="$3"
 
   local desc
   desc="$(phase_description "$plan_file" "$phase")"
@@ -45,13 +49,14 @@ phase_summary_block() {
   local closed_at
   closed_at="$(date +%Y-%m-%d)"
 
+  local phase_dir="$plan_dir/phase${phase}"
   local errors_s missing_s review_s security_s
-  errors_s="$(applied_summary "$proj_dir/errors_phase${phase}.md")"
-  missing_s="$(applied_summary "$proj_dir/missing_phase${phase}.md")"
-  review_s="$(applied_summary "$proj_dir/review_phase${phase}.md")"
-  security_s="$(applied_summary "$proj_dir/security_phase${phase}.md")"
+  errors_s="$(applied_summary "$phase_dir/errors.md")"
+  missing_s="$(applied_summary "$phase_dir/missing.md")"
+  review_s="$(applied_summary "$phase_dir/review.md")"
+  security_s="$(applied_summary "$phase_dir/security.md")"
 
-  local final_file="$proj_dir/final_check_phase${phase}.md"
+  local final_file="$phase_dir/final_check.md"
   local smoke_status="?"
   local smoke_detail=""
   if [[ -f "$final_file" ]]; then
@@ -68,6 +73,7 @@ phase_summary_block() {
   local smoke_line="$smoke_status"
   [[ -n "$smoke_detail" ]] && smoke_line="$smoke_status — $smoke_detail"
 
+  # Ссылки в резюме — относительные от plan.md, который лежит рядом с папкой phaseN/.
   cat <<EOF
 ### Фаза $phase — закрыта $closed_at
 
@@ -77,7 +83,7 @@ phase_summary_block() {
   - missing: $missing_s
   - review: $review_s
   - security: $security_s
-- **Отчёты:** [errors_phase${phase}.md](errors_phase${phase}.md) · [missing_phase${phase}.md](missing_phase${phase}.md) · [review_phase${phase}.md](review_phase${phase}.md) · [security_phase${phase}.md](security_phase${phase}.md) · [final_check_phase${phase}.md](final_check_phase${phase}.md)
+- **Отчёты:** [errors](phase${phase}/errors.md) · [missing](phase${phase}/missing.md) · [review](phase${phase}/review.md) · [security](phase${phase}/security.md) · [final_check](phase${phase}/final_check.md)
 - **Smoke:** $smoke_line
 EOF
 }

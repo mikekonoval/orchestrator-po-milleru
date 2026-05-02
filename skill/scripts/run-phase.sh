@@ -2,7 +2,8 @@
 # run-phase.sh <phase-number> [--dry-run] [--no-commit] [--allow-dirty]
 #
 # Гонит одну фазу через 5 блоков (ERRORS → MISSING → REVIEW → SECURITY → FINAL CHECK).
-# Запускается из корня проекта. Отчёты пишутся в текущую директорию.
+# Запускается из корня проекта. Активный план берёт из plans/.active.
+# Все рабочие файлы (промт фазы, отчёты, state) лежат в plans/<plan-name>/.
 # По итогам успешной фазы делает один git-коммит (если в репо).
 #
 # Флаги:
@@ -54,8 +55,27 @@ fi
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(pwd)"
-STATE_FILE="$PROJECT_DIR/state.json"
+export PROJECT_DIR
 PROMPTS_DIR="$SKILL_DIR/prompts"
+
+# shellcheck source=lib/plan.sh
+source "$SKILL_DIR/scripts/lib/plan.sh"
+
+# Определяем активный план до подключения остальных хелперов: им нужен PLAN_DIR.
+if ! PLAN_NAME="$(active_plan_name 2>/dev/null)"; then
+  echo "ERROR: активный план не задан. Создай план через init-project.sh <name>" >&2
+  echo "       или активируй существующий: activate-plan.sh <name>" >&2
+  exit 1
+fi
+
+if ! plan_exists "$PLAN_NAME"; then
+  echo "ERROR: plans/.active указывает на '$PLAN_NAME', но папки plans/$PLAN_NAME/ нет" >&2
+  echo "       Создай: bash $SKILL_DIR/scripts/init-project.sh $PLAN_NAME" >&2
+  exit 1
+fi
+
+PLAN_DIR="$PROJECT_DIR/plans/$PLAN_NAME"
+STATE_FILE="$PLAN_DIR/state.json"
 
 # shellcheck source=lib/state.sh
 source "$SKILL_DIR/scripts/lib/state.sh"
@@ -69,7 +89,7 @@ source "$SKILL_DIR/scripts/lib/summary.sh"
 # --- helpers ----------------------------------------------------------------
 
 log() {
-  printf '[phase %s] %s\n' "$PHASE" "$*" >&2
+  printf '[plan %s | phase %s] %s\n' "$PLAN_NAME" "$PHASE" "$*" >&2
 }
 
 die() {
@@ -79,12 +99,22 @@ die() {
   exit 1
 }
 
-# Подставляет {N} → номер фазы, {PROJECT_DIR} → корень проекта.
+# Подставляет:
+#   {N}          → номер фазы
+#   {PROJECT_DIR}→ корень проекта (абсолютный путь)
+#   {PLAN_DIR}   → относительный путь от корня проекта до папки плана: plans/<name>
+#   {PLAN_NAME}  → имя активного плана
 render_prompt() {
   local prompt_file="$1"
   local path="$PROMPTS_DIR/$prompt_file"
   [[ -f "$path" ]] || die "prompt file not found: $path"
-  sed -e "s|{N}|$PHASE|g" -e "s|{PROJECT_DIR}|$PROJECT_DIR|g" "$path"
+  local plan_dir_rel="plans/$PLAN_NAME"
+  sed \
+    -e "s|{N}|$PHASE|g" \
+    -e "s|{PROJECT_DIR}|$PROJECT_DIR|g" \
+    -e "s|{PLAN_DIR}|$plan_dir_rel|g" \
+    -e "s|{PLAN_NAME}|$PLAN_NAME|g" \
+    "$path"
 }
 
 run_agent() {
@@ -114,7 +144,7 @@ require_file() {
 
 run_block() {
   local block="$1"
-  local report_file="$PROJECT_DIR/${block}_phase${PHASE}.md"
+  local report_file="$PHASE_DIR/${block}.md"
 
   state_set "step" "${block}_find"
   log "блок $block: поиск"
@@ -142,7 +172,7 @@ run_block() {
   if has_escalate "$report_file"; then
     log "блок $block: ESCALATE в ## APPLIED, останавливаю фазу"
     state_set "status" "escalated"
-    state_set "error" "ESCALATE in ${block}_phase${PHASE}.md"
+    state_set "error" "ESCALATE in plans/$PLAN_NAME/phase${PHASE}/${block}.md"
     exit 2
   fi
 }
@@ -151,8 +181,13 @@ run_block() {
 
 cd "$PROJECT_DIR"
 
-[[ -d "$PROJECT_DIR/plans" ]] || die "не вижу plans/ в $PROJECT_DIR — сначала init-project.sh"
-mkdir -p "$PROJECT_DIR/plans/promts"
+[[ -d "$PLAN_DIR" ]] || die "не вижу plan-папку $PLAN_DIR — сначала init-project.sh $PLAN_NAME"
+mkdir -p "$PLAN_DIR/promts"
+
+PHASE_DIR="$PLAN_DIR/phase${PHASE}"
+mkdir -p "$PHASE_DIR"
+
+log "активный план: $PLAN_NAME ($PLAN_DIR)"
 
 # Стартовая проверка: рабочее дерево должно быть чистым, чтобы фазовый коммит
 # не утащил с собой случайные несвязанные правки. В dry-run проверку пропускаем.
@@ -166,14 +201,14 @@ if [[ "$DRY_RUN" != "--dry-run" ]] && [[ "$ALLOW_DIRTY" != "yes" ]] && git_avail
 fi
 
 if state_already_done "$PHASE"; then
-  log "фаза $PHASE уже done в state.json — нечего делать. Чтобы перезапустить: rm state.json"
+  log "фаза $PHASE уже done в $STATE_FILE — нечего делать. Чтобы перезапустить: rm $STATE_FILE"
   exit 0
 fi
 
 state_init "$PHASE"
 
 # 0. Промт фазы. Если нет — генерируем через мета-промт.
-PHASE_PROMPT_FILE="$PROJECT_DIR/plans/promts/phase${PHASE}.md"
+PHASE_PROMPT_FILE="$PLAN_DIR/promts/phase${PHASE}.md"
 if [[ ! -f "$PHASE_PROMPT_FILE" ]]; then
   log "$PHASE_PROMPT_FILE отсутствует, генерирую"
   state_set "step" "phase_generate"
@@ -204,7 +239,7 @@ state_set "step" "final_check"
 log "финальная проверка (regression + smoke)"
 run_agent "$(render_prompt "final_check.md")" "final:check"
 
-FINAL_FILE="$PROJECT_DIR/final_check_phase${PHASE}.md"
+FINAL_FILE="$PHASE_DIR/final_check.md"
 require_file "$FINAL_FILE" "final_check"
 
 # В dry-run финальной проверки не было — статус «прошло бы», выход 0.
@@ -215,7 +250,7 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
 fi
 
 # 4. Закрытие фазы.
-PLAN_FILE="$(ls "$PROJECT_DIR"/plans/*.md 2>/dev/null | grep -v '^.*/promts/' | head -n 1 || true)"
+PLAN_FILE="$(plan_md_for "$PLAN_NAME" || true)"
 
 if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
   if [[ -n "$PLAN_FILE" ]] && grep -qE "^- \[ \] Фаза $PHASE" "$PLAN_FILE"; then
@@ -228,7 +263,7 @@ if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
 
     # Резюме фазы — детерминированно из отчётов и плана. Вставляется до autocommit,
     # поэтому попадает в тот же фазовый коммит, что и [x].
-    SUMMARY_BLOCK="$(phase_summary_block "$PHASE" "$PLAN_FILE" "$PROJECT_DIR")"
+    SUMMARY_BLOCK="$(phase_summary_block "$PHASE" "$PLAN_FILE" "$PLAN_DIR")"
     insert_summary_into_plan "$PLAN_FILE" "$SUMMARY_BLOCK"
     log "вставил резюме фазы $PHASE в $PLAN_FILE"
   else
@@ -243,7 +278,7 @@ if smoke_passed "$FINAL_FILE" && regression_clean "$FINAL_FILE"; then
   elif ! git_available; then
     log "autocommit пропущен (не git-репо)"
   else
-    SHA="$(git_commit_phase "$PHASE" "$PLAN_FILE")"
+    SHA="$(git_commit_phase "$PHASE" "$PLAN_FILE" "$PLAN_NAME")"
     log "autocommit: $SHA"
   fi
 

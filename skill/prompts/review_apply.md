@@ -5,11 +5,11 @@
 1. **`CLAUDE.md`** — продукт, приоритеты.
 2. **`idea/`** (если есть) — особенно `05-principles/` (что нельзя нарушать).
 3. **`architecture/`** (если есть) — особенно `03-данные/`, `07-решения/`. Фикс не должен противоречить ADR.
-4. **`plans/promts/phase{N}.md`** — рамки фазы.
+4. **`{PLAN_DIR}/promts/phase{N}.md`** — рамки фазы.
 
 ## Что ещё прочитать для этого шага
 
-5. **`review_phase{N}.md`** — секцию `## PROVEN`.
+5. **`{PLAN_DIR}/phase{N}/review.md`** — секцию `## PROVEN`.
 6. Код в местах с реальными регрессиями.
 
 ## Что сделать
@@ -27,7 +27,7 @@ ESCALATE: <причина, со ссылкой на нарушаемый ADR/и�
 
 ## Куда записать (если не ESCALATE)
 
-Дополни `review_phase{N}.md`:
+Дополни `{PLAN_DIR}/phase{N}/review.md`:
 
 ```markdown
 ## APPLIED
@@ -37,4 +37,4 @@ ESCALATE: <причина, со ссылкой на нарушаемый ADR/и�
    ```
 ```
 
-В финальном ответе: `STATUS=done FILE=review_phase{N}.md APPLIED=<число>` или `STATUS=escalate REASON=<...>`.
+В финальном ответе: `STATUS=done FILE={PLAN_DIR}/phase{N}/review.md APPLIED=<число>` или `STATUS=escalate REASON=<...>`.

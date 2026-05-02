@@ -24,12 +24,15 @@ PROMPTS=(
 )
 
 # Якоря, которые должны быть в каждом промте.
+# Каждый якорь — список альтернатив, разделённых '|'. Достаточно, чтобы хотя бы одна
+# альтернатива нашлась через grep -F. Это позволяет принимать и `plans/`, и `{PLAN_DIR}`
+# (который при рендеринге превращается в `plans/<name>` — то же самое концептуально).
 ANCHORS=(
   "Контекст проекта"
   "CLAUDE.md"
   "idea/"
   "architecture/"
-  "plans/"
+  "plans/|{PLAN_DIR}"
 )
 
 for name in "${PROMPTS[@]}"; do
@@ -42,12 +45,20 @@ for name in "${PROMPTS[@]}"; do
     continue
   fi
 
-  for anchor in "${ANCHORS[@]}"; do
-    if grep -qF "$anchor" "$file"; then
-      echo "  ✓ ссылается на: $anchor"
-      PASS=$((PASS + 1))
-    else
-      echo "  ✗ НЕТ ссылки на: $anchor"
+  for anchor_group in "${ANCHORS[@]}"; do
+    found=0
+    # Разбираем альтернативы по '|' и ищем хотя бы одну.
+    IFS='|' read -ra alts <<< "$anchor_group"
+    for alt in "${alts[@]}"; do
+      if grep -qF "$alt" "$file"; then
+        found=1
+        echo "  ✓ ссылается на: $alt"
+        PASS=$((PASS + 1))
+        break
+      fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+      echo "  ✗ НЕТ ссылки ни на одну альтернативу из: $anchor_group"
       FAIL=$((FAIL + 1))
     fi
   done

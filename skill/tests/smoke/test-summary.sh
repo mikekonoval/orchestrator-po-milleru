@@ -48,18 +48,23 @@ assert_eq() {
   fi
 }
 
+# Создаём plan-папку
+PLAN_NAME="myplan"
+PLAN_DIR="$TMP/plans/$PLAN_NAME"
+mkdir -p "$PLAN_DIR/phase1" "$PLAN_DIR/phase2" "$PLAN_DIR/phase3"
+
 # --- applied_summary --------------------------------------------------------
 
 # 1. Файл не существует → "—"
 echo "applied_summary:"
-assert_eq "—" "$(applied_summary "$TMP/no-such-file.md")" "—  для отсутствующего файла"
+assert_eq "—" "$(applied_summary "$PLAN_DIR/phase99/errors.md")" "—  для отсутствующего файла"
 
 # 2. Файл с FOUND: пусто → "—"
-echo "## FOUND: пусто" > "$TMP/empty.md"
-assert_eq "—" "$(applied_summary "$TMP/empty.md")" "—  когда FOUND пусто"
+echo "## FOUND: пусто" > "$PLAN_DIR/phase1/empty.md"
+assert_eq "—" "$(applied_summary "$PLAN_DIR/phase1/empty.md")" "—  когда FOUND пусто"
 
 # 3. Файл с APPLIED — извлекает первые строки
-cat > "$TMP/has_applied.md" <<'EOF'
+cat > "$PLAN_DIR/phase1/has_applied.md" <<'EOF'
 ## FOUND
 1. ...
 
@@ -72,7 +77,7 @@ cat > "$TMP/has_applied.md" <<'EOF'
 3. fix in baz.js: race
 4. fix in qux.js: leak
 EOF
-RESULT="$(applied_summary "$TMP/has_applied.md")"
+RESULT="$(applied_summary "$PLAN_DIR/phase1/has_applied.md")"
 assert_contains "fix in foo.js" "$RESULT" "извлёк первый пункт APPLIED"
 assert_contains "fix in bar.js" "$RESULT" "извлёк второй пункт APPLIED"
 assert_contains "fix in baz.js" "$RESULT" "извлёк третий пункт APPLIED"
@@ -88,7 +93,7 @@ fi
 
 # --- phase_summary_block ----------------------------------------------------
 
-cat > "$TMP/plan.md" <<'EOF'
+cat > "$PLAN_DIR/plan.md" <<'EOF'
 # План
 
 ## Фазы
@@ -101,11 +106,11 @@ cat > "$TMP/plan.md" <<'EOF'
 <!-- РЕЗЮМЕ ФАЗ ВЫШЕ ЭТОЙ СТРОКИ. Не удаляй маркер. -->
 EOF
 
-cat > "$TMP/errors_phase1.md"   <<< "## FOUND: пусто"
-cat > "$TMP/missing_phase1.md"  <<< "## FOUND: пусто"
-cat > "$TMP/review_phase1.md"   <<< "## FOUND: пусто"
-cat > "$TMP/security_phase1.md" <<< "## FOUND: пусто"
-cat > "$TMP/final_check_phase1.md" <<'EOF'
+cat > "$PLAN_DIR/phase1/errors.md"   <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase1/missing.md"  <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase1/review.md"   <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase1/security.md" <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase1/final_check.md" <<'EOF'
 ## REGRESSION
 чисто
 
@@ -115,19 +120,19 @@ EOF
 
 echo
 echo "phase_summary_block (все блоки пусты, smoke pass):"
-BLOCK="$(phase_summary_block 1 "$TMP/plan.md" "$TMP")"
+BLOCK="$(phase_summary_block 1 "$PLAN_DIR/plan.md" "$PLAN_DIR")"
 
 assert_contains "### Фаза 1 — закрыта" "$BLOCK" "заголовок есть с номером и датой"
 assert_contains "построить базовую структуру" "$BLOCK" "взял описание из плана"
-assert_contains "[errors_phase1.md](errors_phase1.md)" "$BLOCK" "ссылка на errors_phase1"
-assert_contains "[final_check_phase1.md](final_check_phase1.md)" "$BLOCK" "ссылка на final_check_phase1"
+assert_contains "[errors](phase1/errors.md)" "$BLOCK" "ссылка на errors phase1"
+assert_contains "[final_check](phase1/final_check.md)" "$BLOCK" "ссылка на final_check phase1"
 assert_contains "Smoke:** pass" "$BLOCK" "статус smoke=pass"
 assert_contains "npm test зелёный" "$BLOCK" "детали smoke в строке"
 assert_contains "errors: —" "$BLOCK" "errors помечен как — (FOUND пусто)"
 
 # --- phase_summary_block: с реальным APPLIED -------------------------------
 
-cat > "$TMP/errors_phase2.md" <<'EOF'
+cat > "$PLAN_DIR/phase2/errors.md" <<'EOF'
 ## FOUND
 1. ...
 
@@ -137,10 +142,10 @@ cat > "$TMP/errors_phase2.md" <<'EOF'
 ## APPLIED
 1. handler.js:42 — добавил проверку null
 EOF
-cat > "$TMP/missing_phase2.md"  <<< "## FOUND: пусто"
-cat > "$TMP/review_phase2.md"   <<< "## FOUND: пусто"
-cat > "$TMP/security_phase2.md" <<< "## FOUND: пусто"
-cat > "$TMP/final_check_phase2.md" <<'EOF'
+cat > "$PLAN_DIR/phase2/missing.md"  <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase2/review.md"   <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase2/security.md" <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase2/final_check.md" <<'EOF'
 ## REGRESSION
 чисто
 
@@ -148,24 +153,19 @@ cat > "$TMP/final_check_phase2.md" <<'EOF'
 pass
 EOF
 
-# Дописываем фазу 2 в план
-cat >> "$TMP/plan.md.tmp" <<EOF
-$(cat "$TMP/plan.md")
-EOF
-
 echo
 echo "phase_summary_block (errors с APPLIED):"
-BLOCK2="$(phase_summary_block 2 "$TMP/plan.md" "$TMP")"
+BLOCK2="$(phase_summary_block 2 "$PLAN_DIR/plan.md" "$PLAN_DIR")"
 assert_contains "добавить логирование" "$BLOCK2" "взял описание фазы 2 из плана"
-assert_contains "handler.js:42" "$BLOCK2" "извлёк applied из errors_phase2"
+assert_contains "handler.js:42" "$BLOCK2" "извлёк applied из phase2/errors"
 
 # --- insert_summary_into_plan ----------------------------------------------
 
 echo
 echo "insert_summary_into_plan:"
-insert_summary_into_plan "$TMP/plan.md" "$BLOCK"
+insert_summary_into_plan "$PLAN_DIR/plan.md" "$BLOCK"
 
-if grep -qF "$SUMMARY_MARKER" "$TMP/plan.md"; then
+if grep -qF "$SUMMARY_MARKER" "$PLAN_DIR/plan.md"; then
   echo "  ✓ маркер сохранён после вставки"
   PASS=$((PASS + 1))
 else
@@ -173,7 +173,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if grep -qF "### Фаза 1 — закрыта" "$TMP/plan.md"; then
+if grep -qF "### Фаза 1 — закрыта" "$PLAN_DIR/plan.md"; then
   echo "  ✓ блок резюме вставлен в план"
   PASS=$((PASS + 1))
 else
@@ -182,8 +182,8 @@ else
 fi
 
 # Маркер должен быть НИЖЕ блока — проверяем порядок строк
-HEADER_LINE="$(grep -n "^### Фаза 1 — закрыта" "$TMP/plan.md" | head -1 | cut -d: -f1)"
-MARKER_LINE="$(grep -nF "$SUMMARY_MARKER" "$TMP/plan.md" | head -1 | cut -d: -f1)"
+HEADER_LINE="$(grep -n "^### Фаза 1 — закрыта" "$PLAN_DIR/plan.md" | head -1 | cut -d: -f1)"
+MARKER_LINE="$(grep -nF "$SUMMARY_MARKER" "$PLAN_DIR/plan.md" | head -1 | cut -d: -f1)"
 if [[ -n "$HEADER_LINE" && -n "$MARKER_LINE" && "$HEADER_LINE" -lt "$MARKER_LINE" ]]; then
   echo "  ✓ блок резюме вставлен ПЕРЕД маркером (line $HEADER_LINE < $MARKER_LINE)"
   PASS=$((PASS + 1))
@@ -193,27 +193,27 @@ else
 fi
 
 # Идемпотентность: вставка ещё раз даёт два блока (по дизайну — append)
-insert_summary_into_plan "$TMP/plan.md" "$BLOCK2"
-COUNT_HEADERS="$(grep -c "^### Фаза [0-9]" "$TMP/plan.md" || true)"
+insert_summary_into_plan "$PLAN_DIR/plan.md" "$BLOCK2"
+COUNT_HEADERS="$(grep -c "^### Фаза [0-9]" "$PLAN_DIR/plan.md" || true)"
 assert_eq "2" "$COUNT_HEADERS" "после двух вставок в плане 2 блока резюме"
 
 # --- smoke fail сценарий ----------------------------------------------------
 
-cat > "$TMP/final_check_phase3.md" <<'EOF'
+cat > "$PLAN_DIR/phase3/final_check.md" <<'EOF'
 ## REGRESSION
 чисто
 
 ## SMOKE
 fail — тесты падают, 3 ошибки в auth.test.js
 EOF
-cat > "$TMP/errors_phase3.md"   <<< "## FOUND: пусто"
-cat > "$TMP/missing_phase3.md"  <<< "## FOUND: пусто"
-cat > "$TMP/review_phase3.md"   <<< "## FOUND: пусто"
-cat > "$TMP/security_phase3.md" <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase3/errors.md"   <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase3/missing.md"  <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase3/review.md"   <<< "## FOUND: пусто"
+cat > "$PLAN_DIR/phase3/security.md" <<< "## FOUND: пусто"
 
 echo
 echo "phase_summary_block (smoke fail):"
-BLOCK3="$(phase_summary_block 3 "$TMP/plan.md" "$TMP")"
+BLOCK3="$(phase_summary_block 3 "$PLAN_DIR/plan.md" "$PLAN_DIR")"
 assert_contains "Smoke:** fail" "$BLOCK3" "статус smoke=fail отражён"
 assert_contains "auth.test.js" "$BLOCK3" "детали fail в строке"
 

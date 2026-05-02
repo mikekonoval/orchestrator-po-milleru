@@ -15,7 +15,7 @@ description: Use when the user wants to run an automated multi-phase code-review
 
 - Пользователь хочет запустить ревью-пайплайн по фазам автоматически, без ручного копи-паста промтов.
 - В проекте уже есть `plans/`, `architecture/`, или пользователь только их собирается завести.
-- Пользователь упоминает «оркестратор», «миллер», «фаза», «найти → доказать → применить», блоки `errors_phase{N}.md` / `missing_phase{N}.md` / `review_phase{N}.md` / `security_phase{N}.md`.
+- Пользователь упоминает «оркестратор», «миллер», «фаза», «найти → доказать → применить», блоки `phaseN/errors.md` / `phaseN/missing.md` / `phaseN/review.md` / `phaseN/security.md`.
 - Пользователь жалуется, что 13 шагов на фазу руками — ад, или что Claude-оркестратор забивает контекст.
 
 ## Когда НЕ триггерить
@@ -36,15 +36,34 @@ description: Use when the user wants to run an automated multi-phase code-review
 
 ## Архитектура (что нужно знать перед запуском)
 
+Все рабочие файлы скилла группируются по плану. Раскладка:
+
+```
+plans/
+├── .active                      ← имя активного плана (одна строка)
+└── <plan-name>/                 ← одна папка на план
+    ├── plan.md                  ← список фаз и резюме закрытых
+    ├── state.json               ← состояние оркестратора для этого плана
+    ├── promts/phase{N}.md       ← промт фазы (генерируется при первом запуске)
+    └── phase{N}/                ← отчёты блоков фазы N
+        ├── errors.md
+        ├── missing.md
+        ├── review.md
+        ├── security.md
+        └── final_check.md
+```
+
 Скрипт `run-phase.sh N` делает следующее в одном проходе:
 
-1. Читает `state.json`. Если фаза `N` уже `done` — отказывается перезапускать.
-2. Если `plans/promts/phase{N}.md` нет — генерирует его через `claude -p` с мета-промтом из `prompts/phase_generate.md` (читает CLAUDE.md, architecture/, plans/).
+1. Читает `plans/.active`, определяет активный план. Читает `plans/<plan>/state.json`. Если фаза `N` уже `done` — отказывается перезапускать.
+2. Если `plans/<plan>/promts/phase{N}.md` нет — генерирует его через `claude -p` с мета-промтом из `prompts/phase_generate.md` (читает CLAUDE.md, architecture/, plan.md).
 3. Запускает фазу: суб-агент пишет код по фазе.
 4. Гонит 4 блока (errors, missing, review, security). Каждый блок — 3 шага (find, prove, apply). Между шагами скрипт grep'ит маркеры в файле отчёта и решает, продолжать или пропускать.
-5. Финальный блок — regression + smoke. Если `## SMOKE: pass` и `## REGRESSION: чисто` — ставит `[x]` напротив фазы в `plans/*.md`, обновляет `state.json` до `done`. Иначе — `escalated`, выход с кодом 2.
+5. Финальный блок — regression + smoke. Если `## SMOKE: pass` и `## REGRESSION: чисто` — ставит `[x]` напротив фазы в `plan.md`, обновляет `state.json` до `done`. Иначе — `escalated`, выход с кодом 2.
 
-`run-all.sh` — внешний цикл: гонит фазы по очереди, на ESCALATE останавливается и отчитывается.
+`run-all.sh` — внешний цикл: гонит фазы активного плана по очереди, на ESCALATE останавливается и отчитывается.
+
+`activate-plan.sh <name>` — переключает активный план (просто переписывает `plans/.active`). Без аргумента — показывает текущий и список доступных.
 
 ## Файлы и маркеры
 
@@ -61,14 +80,23 @@ description: Use when the user wants to run an automated multi-phase code-review
 
 В примерах ниже `<SKILL_DIR>` — директория, где лежит этот SKILL.md. Подставь `~/.claude/skills/orchestrator-po-milleru` (для глобальной установки) или `.claude/skills/orchestrator-po-milleru` (для локальной).
 
-### Установка структуры в проект (один раз)
+### Установка структуры в проект (один раз на каждый план)
 
 ```bash
 cd <project-root>
-bash <SKILL_DIR>/scripts/init-project.sh
+bash <SKILL_DIR>/scripts/init-project.sh <plan-name>
 ```
 
-Создаст `plans/`, `plans/promts/`, `architecture/`, `state.json`, `plans/$(date +%Y-%m-%d)-orchestrator.md` (пустой план фаз). Если что-то уже есть — не перезаписывает.
+Имя плана: `[a-z][a-z0-9_-]*`, до 64 символов. Например: `auth-rewrite`, `mvp_v2`, `2026-q1-billing`.
+
+Создаст `plans/<plan-name>/{plan.md,promts/,state.json}`, `architecture/` (если ещё нет) и активирует план через `plans/.active`. Если план с таким именем уже есть — не перезаписывает, только активирует.
+
+Несколько планов могут жить параллельно. Переключение:
+
+```bash
+bash <SKILL_DIR>/scripts/activate-plan.sh <other-plan-name>   # переключить
+bash <SKILL_DIR>/scripts/activate-plan.sh                     # показать активный + список
+```
 
 ### Прогон одной фазы
 
@@ -77,7 +105,7 @@ cd <project-root>
 bash <SKILL_DIR>/scripts/run-phase.sh 1
 ```
 
-Логи идут в stderr. Финальные отчёты — в `errors_phase1.md`, `missing_phase1.md`, `review_phase1.md`, `security_phase1.md`, `final_check_phase1.md`.
+Активный план берётся из `plans/.active`. Логи в stderr с префиксом `[plan <name> | phase N]`. Финальные отчёты — в `plans/<plan>/phase1/{errors,missing,review,security,final_check}.md`.
 
 **Требование:** перед запуском рабочее дерево git должно быть чистым (если проект под git). Иначе скрипт abort'нётся — закоммить или сделай stash. Это нужно, чтобы фазовый коммит не утащил случайные несвязанные правки.
 
@@ -95,19 +123,19 @@ cd <project-root>
 bash <SKILL_DIR>/scripts/run-all.sh
 ```
 
-Идёт по плану в `plans/*.md`, для каждой фазы со статусом `[ ]` запускает `run-phase.sh`. На ESCALATE останавливается.
+Идёт по `plans/<active>/plan.md`, для каждой фазы со статусом `[ ]` запускает `run-phase.sh`. На ESCALATE останавливается.
 
 ### Возобновление
 
-State хранится в `state.json` (`phase`, `step`, `status`). Чтобы начать фазу заново — `rm state.json` или вручную выставь `"status": "pending"`.
+State хранится в `plans/<plan>/state.json` (`phase`, `step`, `status`) — у каждого плана свой. Чтобы начать фазу заново — `rm plans/<plan>/state.json` или вручную выставь `"status": "pending"`. Бросив один план на полпути и переключившись на другой через `activate-plan.sh`, ты не потеряешь его state — он лежит в плановой папке.
 
 ## Что Claude должен сказать пользователю при первом запуске
 
 Если пользователь говорит «запусти оркестратор» в новом проекте:
 
 1. Найди скилл — проверь `~/.claude/skills/orchestrator-po-milleru/` и `<project>/.claude/skills/orchestrator-po-milleru/`. Если нет ни там, ни там — отправь к README репозитория за инструкцией по `install.sh`.
-2. Проверь, есть ли в проекте `plans/` и `state.json`. Нет — предложи `bash <SKILL_DIR>/scripts/init-project.sh`.
-3. Проверь, есть ли в `plans/*.md` план фаз с пунктами `[ ] Фаза N`. Нет — попроси пользователя описать фазы или предложи скилл `superpowers:writing-plans`.
+2. Проверь, есть ли в проекте `plans/.active` и активный план. Нет — спроси, как назвать план, и предложи `bash <SKILL_DIR>/scripts/init-project.sh <plan-name>`.
+3. Проверь, есть ли в `plans/<active>/plan.md` пункты `[ ] Фаза N`. Нет — попроси пользователя описать фазы или предложи скилл `superpowers:writing-plans`.
 4. Проверь `CLAUDE.md` и `architecture/` — если пусто, мета-промт генерации фазы выдаст бессмыслицу. Предупреди.
 5. Запускай `run-phase.sh N` через Bash. **Не выполняй шаги фазы сам**, не копируй промты в свой контекст — это работа скрипта.
 

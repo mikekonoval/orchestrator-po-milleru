@@ -27,19 +27,37 @@ phase_description() {
     | sed -E "s/^- \[[ x]\] Фаза $phase: //"
 }
 
-# Делает один коммит по итогам фазы. Все аргументы — ссылки на отчёты для тела коммита.
-# Использование: git_commit_phase <phase> <plan_file>
+# Делает один коммит по итогам фазы.
+# Использование: git_commit_phase <phase> <plan_file> [<plan_name>]
+# <plan_name>  — для тела коммита; если пусто, попробуем извлечь из пути plan_file.
 git_commit_phase() {
   local phase="$1"
   local plan_file="$2"
+  local plan_name="${3:-}"
   local desc
   desc="$(phase_description "$plan_file" "$phase")"
   [[ -z "$desc" ]] && desc="(без описания в плане)"
 
-  local title="phase $phase: $desc"
+  # Если имя плана не передано — попробуем извлечь из пути plan_file:
+  # ожидается что plan_file = .../plans/<plan_name>/plan.md
+  if [[ -z "$plan_name" && "$plan_file" == */plans/*/* ]]; then
+    plan_name="$(basename "$(dirname "$plan_file")")"
+  fi
+
+  local title_prefix="phase $phase"
+  [[ -n "$plan_name" ]] && title_prefix="[$plan_name] phase $phase"
+
+  local title="$title_prefix: $desc"
   # Ограничиваем заголовок 72 символами — конвенция git.
   if [[ ${#title} -gt 72 ]]; then
     title="${title:0:69}..."
+  fi
+
+  local plan_rel
+  if [[ -n "$plan_name" ]]; then
+    plan_rel="plans/$plan_name"
+  else
+    plan_rel="plans"
   fi
 
   local body
@@ -47,11 +65,11 @@ git_commit_phase() {
 $title
 
 Reports:
-- errors_phase${phase}.md
-- missing_phase${phase}.md
-- review_phase${phase}.md
-- security_phase${phase}.md
-- final_check_phase${phase}.md
+- $plan_rel/phase${phase}/errors.md
+- $plan_rel/phase${phase}/missing.md
+- $plan_rel/phase${phase}/review.md
+- $plan_rel/phase${phase}/security.md
+- $plan_rel/phase${phase}/final_check.md
 
 Plan: $(basename "$plan_file")
 EOF

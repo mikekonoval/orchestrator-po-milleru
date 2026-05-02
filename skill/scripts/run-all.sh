@@ -1,20 +1,40 @@
 #!/usr/bin/env bash
 # run-all.sh [--dry-run]
 #
-# Идёт по плану в plans/*.md и для каждой строки '- [ ] Фаза N' вызывает run-phase.sh N.
+# Идёт по плану активного плана (plans/<active>/plan.md) и для каждой строки
+# '- [ ] Фаза N' вызывает run-phase.sh N. Активный план берёт из plans/.active.
 # Останавливается на первой фазе, которая упала (exit > 0), и возвращает её код.
-# По завершении печатает консолидированную сводку — список закрытых фаз с одной строкой описания.
+# По завершении печатает консолидированную сводку — список закрытых фаз с описанием.
 
 set -euo pipefail
 
 DRY_RUN="${1:-}"
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(pwd)"
+export PROJECT_DIR
+
+# shellcheck source=lib/plan.sh
+source "$SKILL_DIR/scripts/lib/plan.sh"
 
 cd "$PROJECT_DIR"
 
-PLAN_FILE="$(ls "$PROJECT_DIR"/plans/*.md 2>/dev/null | grep -v '^.*/promts/' | head -n 1 || true)"
-[[ -n "$PLAN_FILE" ]] || { echo "не нашёл план в $PROJECT_DIR/plans/*.md" >&2; exit 1; }
+if ! PLAN_NAME="$(active_plan_name 2>/dev/null)"; then
+  echo "ERROR: активный план не задан. Создай: bash $SKILL_DIR/scripts/init-project.sh <name>" >&2
+  exit 1
+fi
+
+if ! plan_exists "$PLAN_NAME"; then
+  echo "ERROR: plans/.active = '$PLAN_NAME', но плана нет в plans/$PLAN_NAME/" >&2
+  exit 1
+fi
+
+PLAN_DIR="$PROJECT_DIR/plans/$PLAN_NAME"
+PLAN_FILE="$(plan_md_for "$PLAN_NAME" || true)"
+[[ -n "$PLAN_FILE" ]] || { echo "не нашёл план в $PLAN_DIR/*.md" >&2; exit 1; }
+
+echo "Активный план: $PLAN_NAME"
+echo "Файл плана:    $PLAN_FILE"
+echo
 
 # Собираем номера фаз, которые ещё не закрыты.
 mapfile -t PENDING < <(grep -oE "^- \[ \] Фаза [0-9]+" "$PLAN_FILE" | grep -oE "[0-9]+$")
@@ -38,7 +58,7 @@ for phase in "${PENDING[@]}"; do
   if [[ "$rc" -ne 0 ]]; then
     echo
     echo "Фаза $phase упала с кодом $rc. Остановка."
-    echo "  state.json: $(cat "$PROJECT_DIR/state.json" 2>/dev/null || echo 'нет')"
+    echo "  state.json: $(cat "$PLAN_DIR/state.json" 2>/dev/null || echo 'нет')"
     exit "$rc"
   fi
   echo

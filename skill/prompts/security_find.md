@@ -5,11 +5,11 @@
 1. **`CLAUDE.md`** — продукт, аудитория.
 2. **`idea/`** (если есть) — особенно `05-principles/` (часто там зафиксированы security-принципы — например, «PII-scrubbing на входе», «хостинг в РФ»), `03-audience/` (кто пользователь — внутренний/внешний/публичный).
 3. **`architecture/`** (если есть) — особенно `05-интеграции/` (внешние системы — surface area), `08-нефункциональные/` (явные требования к security).
-4. **`plans/promts/phase{N}.md`** — что делали в фазе.
+4. **`{PLAN_DIR}/promts/phase{N}.md`** — что делали в фазе.
 
 ## Что ещё прочитать для этого шага
 
-5. Все секции `## APPLIED` из `errors_phase{N}.md`, `missing_phase{N}.md`, `review_phase{N}.md`.
+5. Все секции `## APPLIED` из `{PLAN_DIR}/phase{N}/errors.md`, `{PLAN_DIR}/phase{N}/missing.md`, `{PLAN_DIR}/phase{N}/review.md`.
 6. Текущий код после всех правок фазы.
 
 ## Что проверить
@@ -30,7 +30,7 @@
 
 ## Куда записать
 
-Создай или дополни `security_phase{N}.md` секцией:
+Создай или дополни `{PLAN_DIR}/phase{N}/security.md` секцией:
 
 ```markdown
 ## FOUND
@@ -53,4 +53,4 @@
 ## FOUND: пусто
 ```
 
-В финальном ответе: `STATUS=done FILE=security_phase{N}.md TO_FIX=<число пунктов с пометкой "починить" или "пусто">`.
+В финальном ответе: `STATUS=done FILE={PLAN_DIR}/phase{N}/security.md TO_FIX=<число пунктов с пометкой "починить" или "пусто">`.
